@@ -54,7 +54,7 @@ struct ContentView: View {
     private func uploadPickedFiles(_ urls: [URL]) async {
         // TODO: Set your real upload endpoint here:
         // Example: https://file.oporajita.win/api/upload or similar
-        guard let uploadURL = URL(string: "https://file.oporajita.win/PUT_YOUR_UPLOAD_ENDPOINT") else { return }
+        guard let uploadURL = URL(string: "https://file.oporajita.win/") else { return }
 
         for fileURL in urls {
             do {
