@@ -1,98 +1,132 @@
 import SwiftUI
 import WebKit
-import UniformTypeIdentifiers
 import Combine
+import UniformTypeIdentifiers
 
 private let homeURL = URL(string: "https://file.oporajita.win/")!
 
 struct ContentView: View {
     @StateObject private var webViewStore = WebViewStore()
-    @State private var showingPicker = false
-    @State private var pickedURLs: [URL] = []
+
+    // Game state
+    private let emojis = ["😀","🚑","🤡","🩴","👟","💎","💉","🍕"]
+    @State private var activeEmoji: String? = nil
+    @State private var timeLeft: Int = 0
+    @State private var showBlast: Bool = false
+    @State private var gameRunning: Bool = false
+
+    // Countdown timer
+    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack {
             WebView(webView: webViewStore.webView)
                 .ignoresSafeArea()
                 .overlay(alignment: .top) {
                     if webViewStore.progress < 1.0 {
                         ProgressView(value: webViewStore.progress)
                             .progressViewStyle(.linear)
-                            .padding(.top, 0)
                     }
                 }
-                .refreshable {
-                    webViewStore.webView.reload()
+                .onAppear { webViewStore.load(homeURL) }
+
+            // Countdown / blast overlay
+            if gameRunning {
+                Color.black.opacity(0.55).ignoresSafeArea()
+
+                VStack(spacing: 18) {
+                    Text(showBlast ? "💥" : (activeEmoji ?? ""))
+                        .font(.system(size: 96))
+
+                    if !showBlast {
+                        Text("\(timeLeft)")
+                            .font(.system(size: 72, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                    } else {
+                        Text("Game over")
+                            .font(.title2.weight(.semibold))
+                    }
                 }
-
-            Button {
-                showingPicker = true
-            } label: {
-                Image(systemName: "arrow.up.doc.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .padding(16)
-                    .background(.ultraThinMaterial)
-                    .clipShape(Circle())
-                    .shadow(radius: 8)
+                .padding()
             }
-            .padding()
+
+            // Bottom emoji bar
+            VStack {
+                Spacer()
+                bottomBar
+            }
         }
-        .onAppear {
-            webViewStore.load(homeURL)
-        }
-        .sheet(isPresented: $showingPicker) {
-            DocumentPicker { urls in
-                // Option A (easy): Let the web page handle file input (works if site uses <input type=file>)
-                // Option B (best UX): Upload directly (requires your upload endpoint)
-                pickedURLs = urls
-                Task { await uploadPickedFiles(urls) }
+        .onReceive(ticker) { _ in
+            guard gameRunning, !showBlast else { return }
+            if timeLeft > 0 {
+                timeLeft -= 1
+            }
+            if timeLeft <= 0 {
+                finishGame()
             }
         }
     }
 
-    // MARK: - Option B: Direct Upload Template (fill in endpoint/auth)
-    private func uploadPickedFiles(_ urls: [URL]) async {
-        // TODO: Set your real upload endpoint here:
-        // Example: https://file.oporajita.win/api/upload or similar
-        guard let uploadURL = URL(string: "https://file.oporajita.win/") else { return }
-
-        for fileURL in urls {
-            do {
-                let (data, filename, mimeType) = try readFileForUpload(fileURL)
-                try await MultipartUploader.upload(
-                    to: uploadURL,
-                    fieldName: "file",
-                    filename: filename,
-                    mimeType: mimeType,
-                    fileData: data,
-                    additionalFields: [:],
-                    headers: [:
-                        // TODO: Add auth if needed:
-                        // "Authorization": "Bearer YOUR_TOKEN"
-                    ]
-                )
-
-                // Optional: refresh web UI so user sees the new file
-                await MainActor.run { webViewStore.webView.reload() }
-            } catch {
-                print("Upload failed:", error)
+    private var bottomBar: some View {
+        HStack(spacing: 10) {
+            ForEach(emojis, id: \.self) { e in
+                Button {
+                    startRandomGame()
+                } label: {
+                    Text(e)
+                        .font(.system(size: 22))
+                        .frame(width: 40, height: 40)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .disabled(gameRunning) // prevent re-trigger mid countdown
             }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.bottom, 18)
+        .shadow(radius: 10)
+    }
+
+    private func startRandomGame() {
+        // Choose random emoji (from list) + random time (3..10)
+        activeEmoji = emojis.randomElement()
+        timeLeft = Int.random(in: 3...10)
+        showBlast = false
+        gameRunning = true
+    }
+
+    private func finishGame() {
+        showBlast = true
+
+        // After showing 💥 for a moment, do the “close” behavior
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            // ✅ App Store-safe option:
+            // Instead of closing the app, we can reload the page and end the overlay.
+            webViewStore.webView.reload()
+            gameRunning = false
+            activeEmoji = nil
+
+            // ⚠️ Dev-only hard close (NOT App Store safe):
+            // hardCloseApp()
         }
     }
 
-    private func readFileForUpload(_ url: URL) throws -> (Data, String, String) {
-        let data = try Data(contentsOf: url)
-        let filename = url.lastPathComponent
-        let mimeType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-        return (data, filename, mimeType)
+    // ⚠️ Not App Store safe. Use only for local testing.
+    private func hardCloseApp() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
+            exit(0)
+        }
     }
 }
 
-// MARK: - WKWebView + progress
+// MARK: - WebView + progress
 final class WebViewStore: ObservableObject {
     let webView: WKWebView
     @Published var progress: Double = 0
-
     private var observer: NSKeyValueObservation?
 
     init() {
