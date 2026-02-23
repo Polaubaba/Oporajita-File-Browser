@@ -151,3 +151,7 @@ struct WebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView { webView }
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
+
+
+
+/// this program needs to be upgraded as a fully operating standalone software
